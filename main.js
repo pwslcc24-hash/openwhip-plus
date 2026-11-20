@@ -70,9 +70,9 @@ function createTrayIconFallback() {
     if (!img.isEmpty()) {
       if (process.platform !== 'darwin') return img;
       // Small, single-colour menu bar icon that follows light/dark mode, like the other icons up there.
-      const small = img.resize({ width: 18, height: 18, quality: 'best' });
-      small.setTemplateImage(true);
-      return small;
+      // icon/Template.png (18px) and Template@2x.png (36px) are already menu bar sized.
+      img.setTemplateImage(true);
+      return img;
     }
   }
   console.warn('openwhip: icon/Template.png missing or invalid');
