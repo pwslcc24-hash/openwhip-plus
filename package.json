@@ -1,0 +1,32 @@
+{
+  "name": "openwhip-plus",
+  "version": "1.1.0",
+  "description": "Whip Claude into shape: a stickman that shows up when Claude is slow",
+  "license": "MIT",
+  "main": "main.js",
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "electron",
+    "tray",
+    "overlay",
+    "cli"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pwslcc24-hash/openwhip-plus.git"
+  },
+  "scripts": {
+    "start": "electron ."
+  },
+  "dependencies": {
+    "electron": "^33.0.0",
+    "koffi": "^2.9.0"
+  }
+}

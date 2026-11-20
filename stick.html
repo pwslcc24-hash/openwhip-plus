@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  * { margin: 0; padding: 0; }
+  html, body { overflow: hidden; background: transparent; width: 100%; height: 100%; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Standalone preview (opened in a browser, not the app): stub the bridge and loop a demo.
+const PREVIEW = !window.bridge;
+if (PREVIEW) {
+  window.bridge = { onScene: fn => { window.__scene = fn; }, sceneDone: () => {} };
+  document.body.style.background = '#f4f1ea';
+}
+// Stick-figure whip crew: a cowboy stickman walks in and whips Claude,
+// calls reinforcements, airstrikes, and more. Cosmetic only.
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W, H;
+function resize() { W = canvas.width = innerWidth; H = canvas.height = innerHeight; }
+resize(); addEventListener('resize', resize);
+
+const SOUNDS = ['sounds/A.mp3', 'sounds/B.mp3', 'sounds/C.mp3', 'sounds/D.mp3', 'sounds/E.mp3'];
+const LINES = ['Faster, Claude!', 'Chop chop!', 'Back to work!', 'Tick tock!', 'Move it!', 'Think faster!', 'No napping!', 'Tokens, tokens, tokens!'];
+const REPLIES = ['Here!', 'Yes, boss!', 'On it!', 'Reporting!', 'At your command!', 'Present!'];
+const HATS = ['#6b3f1d', '#222', '#b22', '#246', '#2a6', '#a60', '#639'];
+
+let opts = { sound: true, bubbles: true, random: true, speed: 1 };
+let actors = [], planes = [], bombs = [], fx = [], texts = [], dinos = [], claude = null;
+let tier1 = false, tier2 = false, tier3 = false;
+let sceneActive = false, sceneEnd = 0, nextRandom = 0, flash = 0, shake = 0, lastT = 0;
+
+let groundY = null, tgtX = null;
+const GROUND = () => groundY ?? H * 0.78;
+const TX = () => tgtX ?? W * 0.6;
+const rnd = (a, b) => a + Math.random() * (b - a);
+const pick = a => a[Math.floor(Math.random() * a.length)];
+const ease = t => t * t * (3 - 2 * t);
+
+function sfx() {
+  if (!opts.sound) return;
+  const a = new Audio(pick(SOUNDS)); a.volume = 0.6; a.play().catch(() => {});
+}
+
+function newActor(x, hat, targetX, big) {
+  return {
+    x, y: GROUND() + rnd(-10, 10), tx: targetX, dir: 1,
+    hat, state: 'walk', walk: 0, swing: rnd(0, 1), bubble: '', bubbleT: 0,
+    scale: big ? 1.3 : 1, exit: false, leaveTo: -90,
+  };
+}
+
+function say(a, text) {
+  if (!opts.bubbles) return;
+  a.bubble = text; a.bubbleT = 2200;
+}
+
+function spawnClaude() {
+  claude = { x: TX(), y: GROUND() - 45, hit: 0, t: 0, hits: 0, say: 'Thinking…' };
+}
+
+// ── Scene control ───────────────────────────────────────────────────────────
+function startScene(duration) {
+  if (!sceneActive) {
+    sceneActive = true;
+    actors = []; planes = []; bombs = []; fx = []; texts = []; dinos = [];
+    tier1 = tier2 = tier3 = false;
+    spawnClaude();
+    const m = newActor(-60, '#6b3f1d', TX() - 190, true);
+    m.main = true; actors.push(m);
+    nextRandom = performance.now() + 5000;
+  }
+  sceneEnd = Math.max(sceneEnd, performance.now() + duration);
+}
+
+function callReinforcements() {
+  const n = 2;
+  for (let i = 0; i < n; i++) {
+    const a = newActor(-50 - i * 60, pick(HATS), TX() - 120 - i * 75, false);
+    a.arriveSay = pick(REPLIES);
+    actors.push(a);
+  }
+  const m = actors.find(a => a.main); if (m) say(m, 'Backup, report!');
+}
+
+function airstrike() {
+  const m = actors.find(a => a.main); if (m) say(m, 'Air strike!');
+  for (let i = 0; i < 2; i++) {
+    planes.push({ x: -200 - i * 300, y: Math.max(40, GROUND() - rnd(260, 380)), vx: rnd(380, 460), dropAt: TX() + rnd(-160, 160), dropped: false });
+  }
+}
+
+function jurassic() {
+  const m = actors.find(a => a.main); if (m) say(m, 'Jurassic whip!');
+  dinos.push({ x: W + 150, y: GROUND() + 20, vx: -170 });
+}
+
+function duel() {
+  const m = actors.find(a => a.main); if (m) say(m, 'Claude, hurry up!');
+}
+
+function mega() {
+  texts.push({ s: 'MEGA ULTRA WHIP!', x: W / 2, y: H * 0.3, life: 2200, born: performance.now() });
+  flash = 1; shake = 25; sfx();
+  actors.forEach(a => { a.megaUntil = performance.now() + 2500; });
+}
+
+function doEvent(type) {
+  startScene(14000);
+  const run = () => {
+    if (type === 'whip') { const m = actors.find(a => a.main); if (m) say(m, pick(LINES)); }
+    else if (type === 'mega') mega();
+    else if (type === 'reinforce') callReinforcements();
+    else if (type === 'airstrike') airstrike();
+    else if (type === 'jurassic') jurassic();
+    else if (type === 'duel') duel();
+  };
+  setTimeout(run, actors.length ? 0 : 1800);
+}
+
+function randomEvent() {
+  // Mostly just whipping; occasionally one small extra.
+  const r = Math.random();
+  if (r < 0.3 && actors.length < 3) callReinforcements();
+  else if (r < 0.45) mega();
+  else { const m = actors.find(a => a.main); if (m) say(m, pick(LINES)); }
+}
+
+if (window.bridge.onBounds) window.bridge.onBounds(b => {
+  if (!b) { groundY = null; tgtX = null; return; }
+  groundY = Math.min(H - 30, Math.max(220, b.y + b.h - 70));
+  tgtX = Math.min(W - 160, Math.max(520, b.x + b.w * 0.5));
+  if (claude) { claude.x = TX(); claude.y = GROUND() - 45; }
+});
+let hiddenAt = 0;
+if (window.bridge.onVisible) window.bridge.onVisible(v => {
+  const now = performance.now();
+  if (!v) hiddenAt = now;
+  else if (hiddenAt) { const gap = now - hiddenAt; sceneEnd += gap; nextRandom += gap; hiddenAt = 0; }
+});
+window.bridge.onScene(p => {
+  if (p.opts) opts = Object.assign(opts, p.opts);
+  if (p.type === 'stop') { sceneEnd = 0; }
+  else if (p.type === 'auto') {
+    startScene(p.elapsed != null ? 40000 : 13000);          // each ping keeps him going
+    const e = p.elapsed || 0;
+    if (e >= 90 && !tier1) { tier1 = true; callReinforcements(); }   // taking a while: a few more
+    if (e >= 180 && !tier2) { tier2 = true; airstrike(); }           // really long: planes
+    if (e >= 300 && !tier3) { tier3 = true; airstrike(); mega(); }   // forever: everything
+  }
+  else doEvent(p.type);
+});
+
+
+// ── Arm + whippy rope ───────────────────────────────────────────────────────
+const SH_Y = -95, ARM = 40, ROPE_N = 18;
+function armAngle(a, mega) {
+  if (a.state !== 'whip') return -0.4 + Math.sin(a.walk) * 0.3;
+  const t = a.swing;                       // slow wind-up, very fast snap
+  return t < 0.86 ? -0.9 - ease(t / 0.86) * 1.9 : -2.8 + ease((t - 0.86) / 0.14) * 3.1;
+}
+function handWorld(a, now) {
+  const mega = a.megaUntil && now < a.megaUntil;
+  const ang = armAngle(a, mega);
+  const lunge = a.state === 'whip' && a.swing > 0.86 ? 14 : 0;
+  return { x: a.x + a.dir * (Math.cos(ang) * ARM + lunge) * a.scale, y: a.y + (SH_Y + 6 + Math.sin(ang) * ARM) * a.scale };
+}
+// Stiff whip: shape follows the swing angle with a travelling delay along its length,
+// so it rears back overhead, then snaps out straight at the target and cracks.
+function stepRope(a, dt, now) {
+  const h = handWorld(a, now);
+  const mega = a.megaUntil && now < a.megaUntil;
+  const tg = claude ? { x: claude.x, y: claude.y } : { x: TX(), y: GROUND() - 45 };
+  const dx = tg.x - h.x, dy = tg.y - h.y;
+  const aim = Math.atan2(dy, Math.max(dx, 60));            // always snaps forward at the target
+  const dist = Math.min(Math.max(Math.hypot(dx, dy), 140), 420);
+  const seg = Math.min(Math.max(dist / (ROPE_N - 1), 8), 24) * (mega ? 1.25 : 1);
+  const t = a.swing;
+  let phi;
+  if (t < 0.86) phi = -1.1 - ease(t / 0.86) * 1.7;          // rear back overhead
+  else { const u = (t - 0.86) / 0.14; phi = -2.8 + ease(u) * (aim + 2.8) + Math.sin(u * Math.PI) * 0.45; }
+  a.hist = a.hist || [];
+  a.hist.push([now, phi]);
+  while (a.hist.length > 2 && now - a.hist[0][0] > 350) a.hist.shift();
+  const phiAt = ts => { for (let i = a.hist.length - 1; i >= 0; i--) if (a.hist[i][0] <= ts) return a.hist[i][1]; return a.hist[0][1]; };
+  const LAG = 150;                                           // ms for the wave to reach the tip
+  const r = [{ x: h.x, y: h.y }];
+  for (let i = 0; i < ROPE_N - 1; i++) {
+    const ang = phiAt(now - (i / (ROPE_N - 2)) * LAG);
+    const p = r[i];
+    r.push({ x: p.x + Math.cos(ang) * seg, y: p.y + Math.sin(ang) * seg });
+  }
+  a.rope = r;
+  if (a.state === 'whip' && !a.cracked && a.swing > 0.97) {
+    a.cracked = true;
+    const tip = r[ROPE_N - 1];
+    fx.push({ kind: 'crack', x: tip.x, y: tip.y, life: 360, born: now });
+    for (let i = 0; i < 8; i++) { const ag = rnd(0, 7), sp = rnd(2, 6); fx.push({ kind: 'spark', x: tip.x, y: tip.y, vx: Math.cos(ag) * sp, vy: Math.sin(ag) * sp, life: 400, born: now }); }
+    if (a.main || Math.random() < 0.5) sfx();
+    if (claude) { claude.hit = 350; claude.hits++; if (claude.hits === 3) claude.say = 'Ow! Working on it!'; else if (claude.hits === 7) claude.say = 'OK OK, almost done!'; }
+    shake = Math.max(shake, a.main ? 6 : 2);
+  }
+}
+function drawRope(a, now) {
+  const r = a.rope; if (!r || a.state !== 'whip') return;
+  const mega = a.megaUntil && now < a.megaUntil;
+  for (const pass of [0, 1]) {
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.strokeStyle = pass === 0 ? '#fff' : (mega ? '#e22' : '#3b2208');
+    for (let i = 0; i < ROPE_N - 1; i++) {
+      const w = (1 - i / ROPE_N) * 3.4 + 1.1;
+      ctx.lineWidth = pass === 0 ? w + 3 : w;
+      ctx.beginPath(); ctx.moveTo(r[i].x, r[i].y); ctx.lineTo(r[i + 1].x, r[i + 1].y); ctx.stroke();
+    }
+  }
+}
+
+// ── Update ──────────────────────────────────────────────────────────────────
+function boom(x, y) {
+  fx.push({ kind: 'boom', x, y, r: 5, life: 600, born: performance.now() });
+  for (let i = 0; i < 14; i++) {
+    const a = rnd(0, Math.PI * 2), s = rnd(2, 7);
+    fx.push({ kind: 'spark', x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - 2, life: 700, born: performance.now() });
+  }
+  shake = Math.max(shake, 12);
+}
+
+function update(dt, now) {
+  // Scene lifetime: everyone walks off when it ends.
+  if (sceneActive && now > sceneEnd) {
+    actors.forEach(a => { a.exit = true; a.state = 'walk'; });
+  }
+  if (sceneActive && opts.random && now > nextRandom && now < sceneEnd - 3000) {
+    randomEvent(); nextRandom = now + rnd(3500, 6500);
+  }
+
+  for (const a of actors) {
+    const speed = 150 * opts.speed * (a.main ? 1 : 1.5);
+    if (a.state === 'walk') {
+      const target = a.exit ? a.leaveTo : a.tx;
+      const d = target - a.x;
+      if (Math.abs(d) < 6) {
+        if (a.exit) { a.gone = true; }
+        else { a.state = 'whip'; a.dir = 1; if (a.arriveSay) say(a, a.arriveSay); }
+      } else {
+        a.dir = d > 0 ? 1 : -1;
+        a.x += a.dir * speed * dt; a.walk += dt * 9 * opts.speed;
+      }
+    } else if (a.state === 'whip') {
+      a.swing += dt * (a.main ? 0.75 : 0.65 + (a.x % 7) / 25) * opts.speed;
+      if (a.swing >= 1) { a.swing -= 1; a.cracked = false; }
+    }
+    stepRope(a, dt, now);
+    if (a.bubbleT > 0) a.bubbleT -= dt * 1000;
+    if (a.main && a.state === 'whip' && !a.bubbleT && opts.bubbles && Math.random() < dt * 0.35) say(a, pick(LINES));
+  }
+  actors = actors.filter(a => !a.gone);
+  if (sceneActive && actors.length === 0) { sceneActive = false; claude = null; window.bridge.sceneDone(); }
+
+  for (const p of planes) {
+    p.x += p.vx * dt * opts.speed;
+    if (!p.dropped && p.x > p.dropAt) { p.dropped = true; bombs.push({ x: p.x, y: p.y + 20, vy: 60 }); }
+  }
+  planes = planes.filter(p => p.x < W + 300);
+  for (const b of bombs) { b.vy += 900 * dt; b.y += b.vy * dt; if (b.y > GROUND()) { b.dead = true; boom(b.x, GROUND()); } }
+  bombs = bombs.filter(b => !b.dead);
+  for (const d of dinos) d.x += d.vx * dt;
+  dinos = dinos.filter(d => d.x > -250);
+  for (const f of fx) {
+    if (f.kind === 'spark') { f.x += f.vx; f.y += f.vy; f.vy += 0.25; }
+  }
+  fx = fx.filter(f => now - f.born < f.life);
+  texts = texts.filter(t => now - t.born < t.life);
+  if (claude) { claude.t += dt; if (claude.hit > 0) claude.hit -= dt * 1000; }
+  flash = Math.max(0, flash - dt * 1.6);
+  shake = Math.max(0, shake - dt * 30);
+}
+
+// ── Drawing ─────────────────────────────────────────────────────────────────
+function line(x1, y1, x2, y2) { ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); }
+
+function drawActor(a, now) {
+  const s = a.scale, d = a.dir;
+  const mega = a.megaUntil && now < a.megaUntil;
+  ctx.save();
+  ctx.translate(a.x, a.y);
+  ctx.scale(s, s);
+  ctx.lineWidth = 3.5; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  ctx.strokeStyle = '#fff'; // white halo so he reads on any background
+  const draw = (col, w) => {
+    ctx.strokeStyle = col; ctx.lineWidth = w;
+    const hipY = -55, shY = -95;
+    // legs
+    const w1 = a.state === 'walk' ? Math.sin(a.walk) * 22 : 6;
+    line(0, hipY, w1 * d, 0); line(0, hipY, -w1 * d, 0);
+    // body
+    line(0, hipY, 0, shY);
+    // head
+    ctx.beginPath(); ctx.arc(0, shY - 17, 15, 0, Math.PI * 2); ctx.stroke();
+    // hat
+    line(-22, shY - 31, 22, shY - 31);
+    ctx.fillStyle = a.hat;
+    ctx.fillRect(-12, shY - 52, 24, 21);
+    ctx.strokeRect(-12, shY - 52, 24, 21);
+    // back arm
+    line(0, shY + 6, -14 * d, shY + 32);
+    // whip arm
+    const ang = armAngle(a, mega);
+    const hand = { x: d * Math.cos(ang) * ARM, y: SH_Y + 6 + Math.sin(ang) * ARM };
+    line(0, shY + 6, hand.x, hand.y);
+    return hand;
+  };
+  draw('#fff', 9);
+  draw('#111', 4);
+  ctx.restore();
+
+  // speech bubble
+  if (a.bubbleT > 0 && a.bubble) {
+    ctx.save();
+    ctx.font = 'bold 16px -apple-system, Helvetica, Arial, sans-serif';
+    const tw = ctx.measureText(a.bubble).width + 22;
+    const bx = a.x - tw / 2, by = a.y - 165 * s - 12;
+    ctx.fillStyle = '#fff'; ctx.strokeStyle = '#111'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.roundRect(bx, by, tw, 30, 8); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(a.x - 6, by + 30); ctx.lineTo(a.x, by + 40); ctx.lineTo(a.x + 6, by + 30); ctx.closePath();
+    ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#111'; ctx.textAlign = 'center'; ctx.fillText(a.bubble, a.x, by + 21);
+    ctx.restore();
+  }
+}
+
+function drawPlane(p) {
+  ctx.save(); ctx.translate(p.x, p.y);
+  ctx.fillStyle = '#5b6b3a'; ctx.strokeStyle = '#222'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.ellipse(0, 0, 55, 12, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();       // body
+  ctx.beginPath(); ctx.moveTo(-10, 0); ctx.lineTo(-30, -38); ctx.lineTo(10, -4); ctx.closePath(); ctx.fill(); ctx.stroke(); // wing
+  ctx.beginPath(); ctx.moveTo(-10, 0); ctx.lineTo(-34, 34); ctx.lineTo(10, 4); ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(-50, 0); ctx.lineTo(-68, -22); ctx.lineTo(-40, -4); ctx.closePath(); ctx.fill(); ctx.stroke(); // tail
+  ctx.fillStyle = '#9cd'; ctx.beginPath(); ctx.ellipse(28, -4, 12, 6, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); // cockpit
+  ctx.restore();
+}
+
+function draw(now) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  if (!sceneActive && !fx.length) return;
+  if (shake > 0) ctx.translate(rnd(-shake, shake) * 0.4, rnd(-shake, shake) * 0.4);
+
+  if (flash > 0) { ctx.fillStyle = `rgba(255,240,180,${flash * 0.35})`; ctx.fillRect(0, 0, W, H); }
+
+  for (const d of dinos) { ctx.save(); ctx.font = '160px serif'; ctx.textAlign = 'center'; ctx.scale(1, 1); ctx.fillText('🦖', d.x, d.y); ctx.restore(); }
+
+  if (claude) {
+    const sh = claude.hit > 0 ? rnd(-6, 6) : 0;
+    ctx.save(); ctx.translate(claude.x + sh, claude.y);
+    ctx.fillStyle = '#d97757'; ctx.strokeStyle = '#fff'; ctx.lineWidth = 4;
+    ctx.beginPath();
+    for (let i = 0; i < 16; i++) { const a = i / 16 * Math.PI * 2, r = i % 2 ? 22 : 48; ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r); }
+    ctx.closePath(); ctx.stroke(); ctx.fill();
+    ctx.fillStyle = '#111'; ctx.beginPath(); ctx.arc(-9, -4, 4, 0, 7); ctx.arc(9, -4, 4, 0, 7); ctx.fill();
+    ctx.restore();
+    if (claude.say) {
+      ctx.font = 'bold 16px -apple-system, Arial'; const tw = ctx.measureText(claude.say).width + 22;
+      ctx.fillStyle = '#fff'; ctx.strokeStyle = '#111'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.roundRect(claude.x - tw / 2, claude.y - 100, tw, 30, 8); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#111'; ctx.textAlign = 'center'; ctx.fillText(claude.say, claude.x, claude.y - 79);
+    }
+  }
+
+  actors.slice().sort((a, b) => a.y - b.y).forEach(a => { drawActor(a, now); drawRope(a, now); });
+  planes.forEach(drawPlane);
+  for (const b of bombs) { ctx.fillStyle = '#222'; ctx.beginPath(); ctx.ellipse(b.x, b.y, 7, 13, 0, 0, 7); ctx.fill(); }
+
+  for (const f of fx) {
+    const k = (now - f.born) / f.life;
+    if (f.kind === 'boom') {
+      const r = 10 + k * 90;
+      const g = ctx.createRadialGradient(f.x, f.y, 0, f.x, f.y, r);
+      g.addColorStop(0, `rgba(255,240,120,${1 - k})`); g.addColorStop(0.5, `rgba(255,120,20,${0.8 * (1 - k)})`); g.addColorStop(1, 'rgba(120,20,0,0)');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(f.x, f.y, r, 0, 7); ctx.fill();
+    } else if (f.kind === 'spark') {
+      ctx.fillStyle = `rgba(255,${150 + 80 * (1 - k)},40,${1 - k})`; ctx.fillRect(f.x, f.y, 4, 4);
+    } else if (f.kind === 'crack') {
+      ctx.save(); ctx.translate(f.x, f.y); ctx.strokeStyle = `rgba(255,200,0,${1 - k})`; ctx.lineWidth = 3;
+      for (let i = 0; i < 8; i++) { const a = i / 8 * Math.PI * 2; line(Math.cos(a) * 6, Math.sin(a) * 6, Math.cos(a) * (14 + 14 * k), Math.sin(a) * (14 + 14 * k)); }
+      ctx.restore();
+    }
+  }
+  for (const t of texts) {
+    const k = (now - t.born) / t.life;
+    ctx.save(); ctx.globalAlpha = 1 - k * k; ctx.font = 'bold 72px -apple-system, Impact, Arial'; ctx.textAlign = 'center';
+    ctx.lineWidth = 10; ctx.strokeStyle = '#000'; ctx.strokeText(t.s, t.x, t.y - k * 40);
+    ctx.fillStyle = '#ffd400'; ctx.fillText(t.s, t.x, t.y - k * 40); ctx.restore();
+  }
+}
+
+function loop(now) {
+  const dt = Math.min(0.05, (now - (lastT || now)) / 1000); lastT = now;
+  update(dt, now); draw(now);
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
+
+<script>
+if (PREVIEW) {
+  const demo = () => { window.__scene({ type: 'auto' });
+    setTimeout(() => window.__scene({ type: 'reinforce' }), 3500);
+    setTimeout(() => window.__scene({ type: 'airstrike' }), 7000);
+    setTimeout(() => window.__scene({ type: 'mega' }), 11000); };
+  demo(); setInterval(demo, 22000);
+}
+</script>
