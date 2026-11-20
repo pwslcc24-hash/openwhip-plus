@@ -37,6 +37,10 @@ let sceneActive = false, sceneEnd = 0, nextRandom = 0, flash = 0, shake = 0, las
 let groundY = null, tgtX = null;
 const GROUND = () => groundY ?? H * 0.78;
 const TX = () => tgtX ?? W * 0.6;
+// Whippers stand in fixed, evenly spaced slots to the left of Claude so they never overlap
+// each other and stay clear of the text. Slot 0 is nearest Claude.
+const SLOT_GAP = 85, MAX_ACTORS = 3;
+const slotX = i => Math.max(40 + (MAX_ACTORS - 1 - i) * SLOT_GAP, TX() - 230 - i * SLOT_GAP);
 const rnd = (a, b) => a + Math.random() * (b - a);
 const pick = a => a[Math.floor(Math.random() * a.length)];
 const ease = t => t * t * (3 - 2 * t);
@@ -46,9 +50,9 @@ function sfx() {
   const a = new Audio(pick(SOUNDS)); a.volume = 0.6; a.play().catch(() => {});
 }
 
-function newActor(x, hat, targetX, big) {
+function newActor(x, hat, slot, big) {
   return {
-    x, y: GROUND() + rnd(-10, 10), tx: targetX, dir: 1,
+    x, slot, y: GROUND() + rnd(-10, 10), tx: slotX(slot), dir: 1,
     hat, state: 'walk', walk: 0, swing: rnd(0, 1), bubble: '', bubbleT: 0,
     scale: big ? 1.3 : 1, exit: false, leaveTo: -90,
   };
@@ -70,7 +74,7 @@ function startScene(duration) {
     actors = []; planes = []; bombs = []; fx = []; texts = []; dinos = [];
     tier1 = tier2 = tier3 = false;
     spawnClaude();
-    const m = newActor(-60, '#6b3f1d', TX() - 190, true);
+    const m = newActor(-60, '#6b3f1d', 0, true);
     m.main = true; actors.push(m);
     nextRandom = performance.now() + 5000;
   }
@@ -78,9 +82,8 @@ function startScene(duration) {
 }
 
 function callReinforcements() {
-  const n = 2;
-  for (let i = 0; i < n; i++) {
-    const a = newActor(-50 - i * 60, pick(HATS), TX() - 120 - i * 75, false);
+  for (let i = 0; actors.length < MAX_ACTORS; i++) {
+    const a = newActor(-50 - i * 60, pick(HATS), actors.length, false);
     a.arriveSay = pick(REPLIES);
     actors.push(a);
   }
@@ -125,7 +128,7 @@ function doEvent(type) {
 function randomEvent() {
   // Mostly just whipping; occasionally one small extra.
   const r = Math.random();
-  if (r < 0.3 && actors.length < 3) callReinforcements();
+  if (r < 0.3 && actors.length < MAX_ACTORS) callReinforcements();
   else if (r < 0.45) mega();
   else { const m = actors.find(a => a.main); if (m) say(m, pick(LINES)); }
 }
@@ -135,6 +138,11 @@ if (window.bridge.onBounds) window.bridge.onBounds(b => {
   groundY = Math.min(H - 30, Math.max(220, b.y + b.h - 70));
   tgtX = Math.min(W - 160, Math.max(520, b.x + b.w * 0.5));
   if (claude) { claude.x = TX(); claude.y = GROUND() - 45; }
+  for (const a of actors) {
+    if (a.slot == null) continue;
+    a.tx = slotX(a.slot);
+    if (a.state === 'whip' && Math.abs(a.tx - a.x) > 6) a.state = 'walk';
+  }
 });
 let hiddenAt = 0;
 if (window.bridge.onVisible) window.bridge.onVisible(v => {
