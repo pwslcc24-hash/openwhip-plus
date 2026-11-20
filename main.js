@@ -68,8 +68,11 @@ function createTrayIconFallback() {
   if (fs.existsSync(p)) {
     const img = nativeImage.createFromPath(p);
     if (!img.isEmpty()) {
-      if (process.platform === 'darwin') img.setTemplateImage(true);
-      return img;
+      if (process.platform !== 'darwin') return img;
+      // Small, single-colour menu bar icon that follows light/dark mode, like the other icons up there.
+      const small = img.resize({ width: 18, height: 18, quality: 'best' });
+      small.setTemplateImage(true);
+      return small;
     }
   }
   console.warn('openwhip: icon/Template.png missing or invalid');
@@ -96,6 +99,8 @@ async function getTrayIcon() {
     return createTrayIconFallback();
   }
   if (process.platform === 'darwin') {
+    const small = createTrayIconFallback();
+    if (!small.isEmpty()) return small;
     const file = path.join(iconDir, 'AppIcon.icns');
     if (fs.existsSync(file)) {
       const fromPath = nativeImage.createFromPath(file);
