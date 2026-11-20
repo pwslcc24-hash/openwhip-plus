@@ -1,5 +1,5 @@
 #!/bin/bash
-# OpenWhip (Porter's version) one-step setup. Run:  bash install.sh
+# OpenWhip Plus one-step setup. Run:  bash install.sh
 set -e
 cd "$(dirname "$0")"
 DIR="$(pwd)"
